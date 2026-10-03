@@ -1,0 +1,12 @@
+# dsh-session-telecom bundle patch。
+#
+# 与本 profile 里其它插件（dsh-session-lock / dsh-free-search）完全同构：
+# bundle 层只负责"把这一行 loader entry 插进组件树"，插件自身通过 inject
+# 等待它需要的服务（webServer / agents / sessions / connection）就绪。
+#
+# 若你的 profile 已经用 `dsh plugin --profile <name> add` 装了本包，并把它写进了
+# package.json 的 dsh.profile.bundles，则这一层会自动生效，无需手工编辑
+# profiles/<name>/cordis.patch.yml。
+- insert:
+    - id: dsh-session-telecom
+      name: dsh-session-telecom
