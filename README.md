@@ -6,7 +6,13 @@ DeepSeek Harness 会话通信插件。复制会话 ID、向在线或已保存的
 
 ## 安装
 
-当前版本通过 [GitHub Release](https://github.com/ltmroberthk915/dsh-session-telecom/releases/tag/v1.0.0) 发布，npm 尚未发布。使用 Release 中的 `.tgz`，通过 DSH 插件管理安装到实际使用的 profile。桌面端在插件管理页面使用发布包 URL；CLI/Web 用户可运行：
+通过 DSH 插件管理安装 [npm 包 `dsh-session-telecom`](https://www.npmjs.com/package/dsh-session-telecom)。桌面端在插件管理页面使用包名；CLI/Web 用户可运行：
+
+```sh
+dsh plugin --profile web add dsh-session-telecom@1.0.0
+```
+
+也可安装 [GitHub Release](https://github.com/ltmroberthk915/dsh-session-telecom/releases/tag/v1.0.0) 中经过相同验证的 `.tgz`：
 
 ```sh
 dsh plugin --profile web add https://github.com/ltmroberthk915/dsh-session-telecom/releases/download/v1.0.0/dsh-session-telecom-1.0.0.tgz
@@ -20,7 +26,7 @@ dsh plugin --profile web add https://github.com/ltmroberthk915/dsh-session-telec
 dsh plugin --profile web add https://codeload.github.com/ltmroberthk915/dsh-session-telecom/tar.gz/e8c3d41e4ccc158a5bf500acbbfde70ebeaae357
 ```
 
-两种方式都不依赖开发者电脑上的源码目录。
+上述安装方式都不依赖开发者电脑上的源码目录。
 
 迁移时先备份 DSH 配置和会话。移除旧插件的依赖和 bundle 项，再安装新包；旧的配置文件可以保留在备份中。不要直接覆盖、清空用户目录或会话数据。
 
