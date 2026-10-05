@@ -9,21 +9,21 @@ DeepSeek Harness 会话通信插件。复制会话 ID、向在线或已保存的
 通过 DSH 插件管理安装 [npm 包 `dsh-session-telecom`](https://www.npmjs.com/package/dsh-session-telecom)。桌面端在插件管理页面使用包名；CLI/Web 用户可运行：
 
 ```sh
-dsh plugin --profile web add dsh-session-telecom@1.0.0
+dsh plugin --profile web add dsh-session-telecom@1.0.1
 ```
 
-也可安装 [GitHub Release](https://github.com/ltmroberthk915/dsh-session-telecom/releases/tag/v1.0.0) 中经过相同验证的 `.tgz`：
+也可安装 [GitHub Release](https://github.com/ltmroberthk915/dsh-session-telecom/releases/tag/v1.0.1) 中经过相同验证的 `.tgz`：
 
 ```sh
-dsh plugin --profile web add https://github.com/ltmroberthk915/dsh-session-telecom/releases/download/v1.0.0/dsh-session-telecom-1.0.0.tgz
+dsh plugin --profile web add https://github.com/ltmroberthk915/dsh-session-telecom/releases/download/v1.0.1/dsh-session-telecom-1.0.1.tgz
 ```
 
 安装后重启宿主。桌面与 Web 的 profile 独立，需要分别安装。
 
-如果所在网络无法访问 GitHub Release 附件，可使用相同版本的固定源码归档；该提交已包含构建后的客户端：
+如果所在网络无法访问 GitHub Release 附件，可使用相同版本标签的源码归档；该标签已包含构建后的客户端：
 
 ```sh
-dsh plugin --profile web add https://codeload.github.com/ltmroberthk915/dsh-session-telecom/tar.gz/e8c3d41e4ccc158a5bf500acbbfde70ebeaae357
+dsh plugin --profile web add https://codeload.github.com/ltmroberthk915/dsh-session-telecom/tar.gz/refs/tags/v1.0.1
 ```
 
 上述安装方式都不依赖开发者电脑上的源码目录。
@@ -47,6 +47,8 @@ dsh plugin --profile web add https://codeload.github.com/ltmroberthk915/dsh-sess
 ```
 
 `queue` 排到目标下一回合；`steer` 插到目标下一步。已保存的离线会话由宿主恢复。发送会唤醒目标并可能产生模型费用，应只在用户授权的通信范围内使用。投递失败返回结构化错误，不自动重复发送；成功回执不要求收件人再回复一条回执。
+
+本插件只访问当前 DSH 宿主可见的 DSH 会话，不提供 zcode 等外部平台会话的查找、读取或接管。带 `query` 的查询没有匹配，或投递返回 `session/not-found` 时，工具描述和返回文本要求模型停止这次查找并向用户报告：不得重复查询、改词扩大搜索、扫描日志或磁盘，也不得自行启动、委派或询问 agent 继续寻找。用户补充或更正 ID、提供外部会话内容或另行完成导入后，可以继续处理该目标；当前对话仍可继续。这是插件文本中的使用规则，不会强制中止会话或封锁工具。
 
 用量显示来自宿主已有投影，不将估算 token 当成货币价格。缺少数据时明确显示未知。
 
