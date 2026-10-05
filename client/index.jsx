@@ -87,7 +87,7 @@ const ZH = {
   'dialog.title': '发送消息到会话',
   'dialog.close': '关闭',
   'dialog.search': '搜索会话',
-  'dialog.searchPlaceholder': '按标题或会话 ID 过滤…',
+  'dialog.searchPlaceholder': '按标题、会话 ID 或工作区过滤…',
   'dialog.target': '目标会话',
   'dialog.text': '消息内容',
   'dialog.mode': '投递方式',
@@ -128,7 +128,7 @@ const EN = {
   'dialog.title': 'Send a message to a session',
   'dialog.close': 'Close',
   'dialog.search': 'Search sessions',
-  'dialog.searchPlaceholder': 'Filter by title or session ID…',
+  'dialog.searchPlaceholder': 'Filter by title, session ID or workspace…',
   'dialog.target': 'Target session',
   'dialog.text': 'Message',
   'dialog.mode': 'Delivery',
@@ -306,6 +306,7 @@ const CSS = `
 .dstk-session-row:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(127, 127, 127, .14)); }
 .dstk-session-row[aria-selected="true"] { background: var(--dsw-alias-interactive-bg-selected, rgba(79, 110, 247, .16)); }
 .dstk-session-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dstk-session-cwd { display: block; overflow: hidden; text-overflow: ellipsis; font-size: 11px; opacity: .7; }
 .dstk-session-time { flex: none; font-size: 11px; color: var(--dsw-alias-label-caption, #9ca3af); }
 .dstk-badge {
   flex: none; font-size: 11px; line-height: 16px; padding: 0 6px; border-radius: 999px;
@@ -1020,7 +1021,7 @@ function SendMessageDialog(props) {
   const filtered = React.useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (needle.length === 0) return sessions;
-    return sessions.filter((row) => String(row?.title ?? '').toLowerCase().includes(needle) || String(row?.id ?? '').toLowerCase().includes(needle));
+    return sessions.filter((row) => String(row?.title ?? '').toLowerCase().includes(needle) || String(row?.id ?? '').toLowerCase().includes(needle) || String(row?.cwd ?? '').toLowerCase().includes(needle));
   }, [sessions, query]);
 
   const targetRow = sessions.find((row) => row?.id === targetId) ?? null;
@@ -1163,7 +1164,7 @@ function SendMessageDialog(props) {
             className="dstk-input"
             type="text"
             value={query}
-            placeholder={pickLabel(t, 'dialog.searchPlaceholder', '按标题或会话 ID 过滤…')}
+            placeholder={pickLabel(t, 'dialog.searchPlaceholder', '按标题、会话 ID 或工作区过滤…')}
             onChange={(event) => setQuery(event.target.value)}
           />
 
@@ -1200,6 +1201,7 @@ function SendMessageDialog(props) {
                   role="option"
                   aria-selected={id === targetId}
                   className="dstk-session-row"
+                  title={`${title}\n${id}${row?.cwd ? `\n${row.cwd}` : ''}`}
                   onClick={() => {
                     try {
                       setTargetId(id);
@@ -1209,7 +1211,7 @@ function SendMessageDialog(props) {
                     }
                   }}
                 >
-                  <span className="dstk-session-title">{title}</span>
+                  <span className="dstk-session-title">{title}{row?.cwd && <span className="dstk-session-cwd">{row.cwd}</span>}</span>
                   {isSelf && <span className="dstk-badge dstk-badge-self">{pickLabel(t, 'dialog.self', '本会话')}</span>}
                   {described.badges.includes('running') && <span className="dstk-badge dstk-badge-running">{pickLabel(t, 'dialog.running', '运行中')}</span>}
                   {described.badges.includes('live') && <span className="dstk-badge">{pickLabel(t, 'dialog.live', '在线')}</span>}

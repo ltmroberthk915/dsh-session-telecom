@@ -182,7 +182,7 @@ function execFor(sessionId) {
 test('工具定义：名字、参数枚举、render 都在', async () => {
   const tool = makeTool();
   assert.equal(tool.name, 'session_telecom');
-  assert.deepEqual(tool.parameters.action.enum, ['list', 'send']);
+  assert.deepEqual(tool.parameters.action.enum, ['list', 'send', 'read', 'peek']);
   assert.equal(typeof tool.render, 'function');
   assert.match(tool.description, /其他 DSH 会话|会话通信/);
   // 反"消息风暴"纪律必须在描述里：对端不必回执、不必翻日志核对身份

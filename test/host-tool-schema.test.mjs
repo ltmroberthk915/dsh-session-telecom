@@ -47,7 +47,10 @@ test('真实 defineTool 接受 session_telecom 的参数与输出 schema', async
 
   const { createSessionTelecomTool } = await import(new URL('../lib/tool.js', import.meta.url).href);
   const tool = createSessionTelecomTool({
-    toolkit: { ctx: {} },
+    toolkit: { ctx: { sessions: { get: id => id === 's-read' ? {
+      header: { id, cwd: 'fixture-workspace' },
+      snapshotEvents: () => [{ type: 'assistant/message', seq: 0, time: 1, data: { message: { content: [{ type: 'text', text: 'handoff fixture' }] } } }],
+    } : undefined } } },
     defineTool,
     createRegistry: () => ({ list: async () => ({ sessions: [], costTotals: {} }) }),
     deliver: async () => ({ delivered: true, live: true }),
@@ -65,6 +68,11 @@ test('真实 defineTool 接受 session_telecom 的参数与输出 schema', async
   assert.equal(value.ok, true);
   assert.equal(value.action, 'list');
   assert.equal(JSON.stringify(value).includes('null'), false, '回执里不许出现 null（DSL 输出类型不允许）');
+  const read = await tool.execute({ action: 'read', sessionId: 's-read' }, {});
+  assert.equal(read.ok, true);
+  assert.match(read.transcript.text, /handoff fixture/);
+  assert.equal(JSON.stringify(read).includes('null'), false);
+  assert.equal(Array.isArray(tool.output.render({ action: 'read' }, read)), true);
 
   // 参数越界要被内核 DSL 拦下（enum 之外的值）
   await assert.rejects(() => tool.execute({ action: 'nope' }, {}), 'action 不在 enum 里必须被拒');

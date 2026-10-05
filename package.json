@@ -1,7 +1,7 @@
 {
   "name": "dsh-session-telecom",
-  "version": "1.0.1",
-  "description": "DSH session communication: copy session IDs, message live or saved sessions, and inspect token usage. Uses host runtime services without installing a second DSH core.",
+  "version": "1.1.0",
+  "description": "DSH session communication: read existing transcripts, copy session IDs, message live or saved sessions, and inspect token usage. Uses host runtime services without installing a second DSH core.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {

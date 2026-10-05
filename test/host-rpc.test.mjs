@@ -324,7 +324,7 @@ test('host 插件三件套 + 通道常量', () => {
   // 通道名必须满足客户端 assertTarget 的 CHANNEL_PATTERN = /^\/[A-Za-z0-9._~-]+$/
   // （单段、不含 `/`）。写多段会在浏览器侧直接抛 invalid RPC target，请求发不出去。
   assert.match(CHANNEL, /^\/[A-Za-z0-9._~-]+$/, '通道只能是单段路径');
-  assert.deepEqual(Object.values(ENDPOINTS).sort(), ['self/info', 'sessions/list', 'sessions/send']);
+  assert.deepEqual(Object.values(ENDPOINTS).sort(), ['self/info', 'sessions/list', 'sessions/read', 'sessions/send']);
 });
 
 test('endpointFromPath 只认本通道下的合法段', () => {
@@ -527,6 +527,11 @@ test('sessions/list：排除 blank、按 updatedAt 倒序、标 live/running/isS
     id: 's-newer',
     title: '新会话',
     updatedAt: 400,
+    cwd: newer.header.cwd,
+    lastEventAt: 0,
+    lastAssistantAt: 0,
+    lastUserAt: 0,
+    lastAssistantPreview: '',
     workspaceId: 'ws-b',
     archived: false,
     blank: false,
@@ -1362,7 +1367,8 @@ test('wire 信封：request → server-response{ok:true,value}，字段与契约
   assert.deepEqual(Object.keys(listEnvelope.result.value).sort(), ['costTotals', 'selfSessionId', 'sessions']);
   assert.deepEqual(Object.keys(listEnvelope.result.value.sessions[0]).sort(), [
     'archived', 'billableTokens', 'blank', 'cacheHitRate', 'cacheReadTokens', 'cacheWriteTokens',
-    'contextLoad', 'contextTokens', 'contextWindow', 'id', 'inputTokens', 'isSelf', 'live',
+    'contextLoad', 'contextTokens', 'contextWindow', 'cwd', 'id', 'inputTokens', 'isSelf',
+    'lastAssistantAt', 'lastAssistantPreview', 'lastEventAt', 'lastUserAt', 'live',
     'outputTokens', 'running', 'title', 'tokens', 'updatedAt', 'workspaceId',
   ]);
 
