@@ -1,7 +1,7 @@
 {
   "name": "dsh-session-telecom",
-  "version": "1.3.1",
-  "description": "让任意两条 DeepSeek Harness 会话直接对话：跨会话发消息、工具级唤醒、只读查看与用量统计 · Cross-session messaging for DSH.",
+  "version": "1.3.2",
+  "description": "跨目录 / 跨项目的 DSH 会话内置通话：任意两条会话直接收发消息、工具级唤醒、只读查看与用量 · Cross-directory session calling for DSH.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -67,7 +67,11 @@
     "deepseek-harness",
     "dsh",
     "session",
-    "cross-session"
+    "cross-session",
+    "cross-project",
+    "workspace",
+    "session-call",
+    "inter-session"
   ],
   "repository": {
     "type": "git",
