@@ -1611,7 +1611,7 @@ test('wire 层：endpoint 内部真实抛错（不是 handler 抛）也必须转
   assert.equal(body.result.error.code, 'gateway/internal');
 });
 
-test('loopback 信任栅栏：requestRejection 可拦截，否则只放行 loopback Host', async () => {
+test('认证 fail-closed：requestRejection 可用才放行；缺能力时一律 403（不做 Host/Origin 兜底）', async () => {
   const toolkit = makeToolkit(makeCtx({}));
   const seen = [];
   const registered = (route) => {
@@ -1634,19 +1634,22 @@ test('loopback 信任栅栏：requestRejection 可拦截，否则只放行 loopb
 
   const denied = await respondOf(seen[0], { headers: { 'x-deny': '1' } });
   assert.equal(denied, 403);
+  const allowed = await respondOf(seen[0], { headers: {} });
+  // 放行后 bridge 把空体交给 fetchHandler，`{}` 不是合法 JSON → 400；重点是没被 403 挡住。
+  assert.equal(allowed, 400, 'requestRejection 放行后进入通道（空体 JSON 解析失败 → 400）');
 
+  // 宿主没有认证能力：不再看 Host/Origin，任何请求都直接 403（fail-closed）。
   const bare = { webServer: { register: registered } };
   mountSessionTelecomWebRoute(bare, { handler: toolkit.rpcHandler });
-  const forged = await respondOf(seen[1], { headers: { host: 'evil.example.com' } });
-  assert.equal(forged, 403);
-  const crossSite = await respondOf(seen[1], { headers: { host: '127.0.0.1:19387', 'sec-fetch-site': 'cross-site' } });
-  assert.equal(crossSite, 403);
-  const badOrigin = await respondOf(seen[1], { headers: { host: '127.0.0.1:19387', origin: 'http://evil.example.com' } });
-  assert.equal(badOrigin, 403);
-  const sameOrigin = await respondOf(seen[1], { headers: { host: '127.0.0.1:19387', origin: 'http://127.0.0.1:19387' } });
-  // 放行后 bridge 把空体交给 fetchHandler，`{}` 不是合法 JSON → 400。
-  // 重点是它**没有被信任栅栏挡住**（403），已经走到了通道内部。
-  assert.equal(sameOrigin, 400, '同源 loopback 必须放行并进入通道（空体 JSON 解析失败 → 400）');
+  assert.equal(seen.length, 2);
+  for (const headers of [
+    { host: '127.0.0.1:19387', origin: 'http://127.0.0.1:19387' },
+    { host: '127.0.0.1:19387' },
+    { host: 'evil.example.com' },
+  ]) {
+    const status = await respondOf(seen[1], { headers });
+    assert.equal(status, 403, `无 requestRejection 时必须拒绝：${JSON.stringify(headers)}`);
+  }
 });
 
 /** 造一个最小 node:http res 替身，跑一次 route.handler，返回写下的状态码。 */
@@ -1696,6 +1699,7 @@ test('apply：把通道挂到 webServer（prefix 路由）并在 ctx.effect 里�
   const ctx = makeCtx({
     sessions: [target],
     agents: [agent],
+    connection: { requestRejection: () => undefined },
     webServer: {
       register(route) {
         routes.push(route);

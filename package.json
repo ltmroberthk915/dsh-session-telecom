@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-telecom",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "description": "跨目录 / 跨项目的 DSH 会话内置通话：任意两条会话直接收发消息、工具级唤醒、只读查看与用量 · Cross-directory session calling for DSH.",
   "type": "module",
   "main": "lib/index.js",
