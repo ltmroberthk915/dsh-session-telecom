@@ -2,10 +2,14 @@
  * dsh-session-telecom · Client 半（浏览器侧）
  *
  * 职责：
- *   1. 在会话行的右键「⋯」菜单里加一行「复制会话 ID」（order 250，落在
- *      重命名 200 与分叉 300 之间），点击后写剪贴板并给出可见反馈。
- *   2. 加一行「发送消息到会话…」（order 260）：打开一个模态，用 sessions/list
- *      选出目标会话、输入文本，经 sessions/send 投递到对方的收件箱。
+ *   1. 在会话行的右键「⋯」菜单里加一行「发送消息到会话…」（order 260）：打开一个模态，
+ *      用 sessions/list 选出目标会话、输入文本，经 sessions/send 投递到对方的收件箱。
+ *
+ * 不再提供「复制会话 ID」菜单行：宿主官方菜单已经自带这一行
+ * （@deepseek-ai/dsh-client-ui-workspace@0.2.1-rc.5+/0.2.2-rc.1 的
+ *  `SessionIdMenuItem` → locale `menu.sessionId`「复制 Session ID」，动作是
+ *  `actions.copySessionId`）。本插件重复注册会让右键菜单变长，2026-11-08 起删除；
+ *  原复制实现没有其它消费者，一并移除（需要时用官方那一行）。
  *
  * 依据的真实宿主契约（均已核对源码，不是猜的）：
  *   - 槽位：`sidebar.workspaces.session.menu.item`，由
@@ -61,15 +65,13 @@ const REGISTRANT = 'dsh-session-telecom';
 
 const MENU_SLOT = 'sidebar.workspaces.session.menu.item';
 const OVERLAY_SLOT = 'shell.overlay';
-const COPY_ENTRY_ID = 'session-toolkit-copy-id';
-const COPY_ENTRY_ORDER = 250;
 const SEND_ENTRY_ID = 'session-toolkit-send-message';
 const SEND_ENTRY_ORDER = 260;
 
 const STYLE_TAG_ID = 'dsh-session-telecom/client.css';
 const TOAST_LAYER_ID = 'dsh-session-telecom-toasts';
 
-/** 复制成功的轻提示停留时长（需求：1.8s 自动消失）。 */
+/** 成功提示的轻提示停留时长（需求：1.8s 自动消失）。 */
 const TOAST_HOLD_SUCCESS_MS = 1800;
 /** 失败提示要能读完原因，给更长时间。 */
 const TOAST_HOLD_ERROR_MS = 4200;
@@ -77,10 +79,7 @@ const TOAST_HOLD_ERROR_MS = 4200;
 // ---------------------------------------------------------------- i18n
 
 const ZH = {
-  'menu.copySessionId': '复制会话 ID',
   'menu.sendMessage': '发送消息到会话…',
-  'toast.copied': '已复制会话 ID',
-  'toast.copyFailed': '复制会话 ID 失败',
   'toast.openFailed': '打开发送消息窗口失败',
   'toast.sent': '已投递到 {title}',
   'toast.woken': '目标会话原本是冷的，宿主已自动唤醒它',
@@ -91,8 +90,8 @@ const ZH = {
   'dialog.target': '目标会话',
   'dialog.text': '消息内容',
   'dialog.mode': '投递方式',
-  'dialog.mode.queue': '排队投递',
-  'dialog.mode.steer': '立即引导',
+  'dialog.mode.steer': '直接投递（默认）',
+  'dialog.mode.queue': '排队到下一轮',
   'dialog.placeholder': '输入要投递的消息…（Enter 发送，Shift+Enter 换行）',
   'dialog.send': '发送',
   'dialog.cancel': '取消',
@@ -106,7 +105,7 @@ const ZH = {
   'dialog.live': '在线',
   'dialog.archived': '已归档',
   'dialog.retry': '重试',
-  'dialog.semantics': '这条消息会以「用户消息」的形式出现在目标会话的时间线上（对方看到的是有人发来消息，而不是它自己的输入），排队等它的下一回合处理；目标会话是冷会话时宿主会自动唤醒它。',
+  'dialog.semantics': '默认「直接投递」：与内核 agent↔subagent 的 send_message 同一条规则——目标正在运行就在它的下一个 step 领取，空闲就直接为它开启新的一轮；只有选「排队到下一轮」才会等目标整轮结束。冷会话由宿主自动唤醒。',
   'dialog.channel': '投递通道',
   'dialog.channel.direct': '（非 prompt 路径）',
   'dialog.costTip': '「计费」= 非缓存输入 + 输出（真正按全价计费的 token）；「缓存」= 输入里走缓存的比例，越高越省',
@@ -118,10 +117,7 @@ const ZH = {
 };
 
 const EN = {
-  'menu.copySessionId': 'Copy session ID',
   'menu.sendMessage': 'Send message to session…',
-  'toast.copied': 'Session ID copied',
-  'toast.copyFailed': 'Failed to copy the session ID',
   'toast.openFailed': 'Could not open the send-message dialog',
   'toast.sent': 'Delivered to {title}',
   'toast.woken': 'The target session was cold; the host woke it up',
@@ -132,8 +128,8 @@ const EN = {
   'dialog.target': 'Target session',
   'dialog.text': 'Message',
   'dialog.mode': 'Delivery',
-  'dialog.mode.queue': 'Queue',
-  'dialog.mode.steer': 'Steer now',
+  'dialog.mode.steer': 'Deliver now (default)',
+  'dialog.mode.queue': 'Queue for next turn',
   'dialog.placeholder': 'Type the message… (Enter sends, Shift+Enter adds a line)',
   'dialog.send': 'Send',
   'dialog.cancel': 'Cancel',
@@ -147,7 +143,7 @@ const EN = {
   'dialog.live': 'live',
   'dialog.archived': 'archived',
   'dialog.retry': 'Retry',
-  'dialog.semantics': 'The message lands on the target timeline as a user message (the target sees an incoming message, not its own input) and waits in the queue for its next turn; a cold target is woken up by the host.',
+  'dialog.semantics': 'By default the message is delivered directly, following the same rule as the kernel send_message between an agent and a subagent: a working target receives it at its next step, an idle target starts a new turn with it. "Queue for next turn" waits for the target to finish its whole turn. A cold target is woken up by the host.',
   'dialog.channel': 'Delivery channel',
   'dialog.channel.direct': ' (not the prompt path)',
   'dialog.costTip': '"billed" = uncached input + output (the tokens actually charged at full price); "cache" = share of input served from cache, higher is cheaper',
@@ -161,7 +157,7 @@ const EN = {
   'error.session/busy': 'The target session is busy, try again later',
   'error.session/agent-busy': 'The target session is held by its parent session or a subagent; cannot insert a message right now',
   'error.session/writer-held': 'Another DSH instance is writing to the target session; close it there first',
-  'error.session/steer-unavailable': 'The target session does not accept steer delivery; use queue instead',
+  'error.session/steer-unavailable': 'The target session does not accept direct (steer) delivery right now; use Queue for next turn instead',
   'error.cancelled': 'Delivery was cancelled',
   'error.bad-request': 'Invalid request: check the target session and the message body',
   'error.unauthorized': 'Not allowed to deliver to that session',
@@ -439,163 +435,6 @@ function notify(kind, text, holdMs) {
   }
 }
 
-// ---------------------------------------------------------------- 剪贴板
-
-/**
- * 把文本写进剪贴板：优先 navigator.clipboard.writeText，
- * 被拒/不可用则回退 document.execCommand('copy') + 隐藏 textarea。
- * 两条路都失败时返回第一条错误（更能说明真实原因）。
- * @param text - 要复制的文本。
- * @returns `{ ok, method?, error? }`，永不抛出。
- */
-async function copyText(text) {
-  const value = String(text ?? '');
-  if (value.length === 0) return { ok: false, error: new Error('empty text') };
-
-  let firstError = null;
-  const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
-  if (clipboard !== undefined && clipboard !== null && typeof clipboard.writeText === 'function') {
-    try {
-      await clipboard.writeText(value);
-      return { ok: true, method: 'navigator.clipboard.writeText' };
-    } catch (error) {
-      firstError = error;
-    }
-  }
-
-  try {
-    if (typeof document === 'undefined' || document.body === null) throw new Error('document unavailable');
-    const area = document.createElement('textarea');
-    area.value = value;
-    area.setAttribute('readonly', '');
-    area.setAttribute('aria-hidden', 'true');
-    area.setAttribute('tabindex', '-1');
-    area.style.position = 'fixed';
-    area.style.top = '-1000px';
-    area.style.left = '-1000px';
-    area.style.width = '1px';
-    area.style.height = '1px';
-    area.style.opacity = '0';
-    document.body.appendChild(area);
-
-    let copied = false;
-    try {
-      area.focus();
-      area.select();
-      area.setSelectionRange(0, area.value.length);
-      copied = document.execCommand('copy') === true;
-    } finally {
-      area.parentNode?.removeChild(area);
-    }
-    if (copied) return { ok: true, method: 'document.execCommand("copy")' };
-    return {
-      ok: false,
-      method: 'document.execCommand("copy")',
-      error: firstError ?? new Error('document.execCommand("copy") 返回 false'),
-    };
-  } catch (error) {
-    return { ok: false, error: firstError ?? error };
-  }
-}
-
-// ---------------------------------------------------------------- 图标（自绘，避免依赖 primitives）
-
-/** 复制图标：与宿主 IconCopyOutline 同几何，16 视窗 / 1px 描边。 */
-function IconCopy({ size = 14 }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 16 16"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      aria-hidden="true"
-      strokeWidth={1}
-    >
-      <rect x="1.52075" y="4.07373" width="10.3932" height="10.3932" rx="2" stroke="currentColor" />
-      <path
-        d="M11.9792 1.53296C13.36 1.53296 14.4792 2.65225 14.4792 4.03296V9.42847C14.4792 10.3756 13.9521 11.1987 13.1755 11.6228V10.3298C13.3652 10.0787 13.4792 9.7674 13.4792 9.42847V4.03296C13.4792 3.20453 12.8077 2.53296 11.9792 2.53296H6.58374C6.27966 2.53301 5.99684 2.6235 5.7605 2.77905H4.42358C4.85652 2.03463 5.66056 1.53304 6.58374 1.53296H11.9792Z"
-        fill="currentColor"
-      />
-    </svg>
-  );
-}
-
-// ---------------------------------------------------------------- 菜单行：复制会话 ID
-
-/** 槽位未提供 hookContext 时的兜底：保持 hook 调用次数恒定。 */
-const NO_MENU_STATE = [false, () => {}];
-function useNoMenuOpenState() {
-  return NO_MENU_STATE;
-}
-
-/**
- * 会话「⋯」菜单里的一行：复制该会话的 ID。
- * @param props - owner 给的 `sessionId`/`displayTitle`、渲染器给的 `t` 座位，
- *                以及槽位注入的 `useMenuOpenState`。
- * @returns 菜单行。
- */
-function CopySessionIdMenuItem(props) {
-  const { sessionId, t } = props ?? {};
-  // 槽位注入的 menuOpenState 工厂 → `useMenuOpenState()` 返回 [open, setOpen]。
-  // 用"引用选择"而不是条件调用，保证 hook 调用序列稳定。
-  const menuStateHook = typeof props?.useMenuOpenState === 'function' ? props.useMenuOpenState : useNoMenuOpenState;
-  const menuState = menuStateHook();
-  const setMenuOpen = Array.isArray(menuState) && typeof menuState[1] === 'function' ? menuState[1] : null;
-
-  const label = pickLabel(t, 'menu.copySessionId', '复制会话 ID');
-  const disabled = typeof sessionId !== 'string' || sessionId.length === 0;
-
-  const onSelect = (event) => {
-    try {
-      if (disabled) return;
-      event?.preventDefault?.();
-      event?.stopPropagation?.();
-      // 宿主行都是先关菜单再干活（选中后菜单会连同本行一起卸载）。
-      if (setMenuOpen !== null) {
-        try {
-          setMenuOpen(false);
-        } catch (error) {
-          console.warn('[dsh-session-telecom] 关闭菜单失败：', error);
-        }
-      }
-      // copyText 永不抛出；这里再兜一层，保证异步链里也不漏异常。
-      void copyText(sessionId)
-        .then((result) => {
-          if (result?.ok === true) {
-            notify('success', pickLabel(t, 'toast.copied', '已复制会话 ID'));
-            return;
-          }
-          notify('error', `${pickLabel(t, 'toast.copyFailed', '复制会话 ID 失败')}：${describeError(result?.error)}`);
-        })
-        .catch((error) => {
-          notify('error', `${pickLabel(t, 'toast.copyFailed', '复制会话 ID 失败')}：${describeError(error)}`);
-        });
-    } catch (error) {
-      notify('error', `${pickLabel(t, 'toast.copyFailed', '复制会话 ID 失败')}：${describeError(error)}`);
-    }
-  };
-
-  return (
-    <div className="dstk-menu-row">
-      <button
-        type="button"
-        role="menuitem"
-        className="dstk-menu-item"
-        disabled={disabled}
-        title={disabled ? label : `${label}: ${sessionId}`}
-        aria-label={label}
-        onClick={onSelect}
-      >
-        <span className="dstk-menu-icon" aria-hidden="true">
-          <IconCopy size={14} />
-        </span>
-        <span className="dstk-menu-label">{label}</span>
-      </button>
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------- Host RPC
 
 /**
@@ -645,7 +484,7 @@ const RPC_ERROR_TEXT = {
   'session/busy': '目标会话正忙，请稍后重试',
   'session/agent-busy': '目标会话正被它的父会话或子代理占用，暂时不能插入消息',
   'session/writer-held': '目标会话正被另一个 DSH 实例写入，请先在那里关掉它',
-  'session/steer-unavailable': '目标会话不支持插队引导（steer），请改用排队投递',
+  'session/steer-unavailable': '目标会话当前不接受直接投递（steer），请改用「排队到下一轮」',
   cancelled: '投递已取消',
   'bad-request': '请求不合法：请检查目标会话与消息内容',
   unauthorized: '没有权限向该会话投递消息',
@@ -843,6 +682,12 @@ function IconSend({ size = 14 }) {
 
 // ---------------------------------------------------------------- 菜单行：发送消息到会话…
 
+/** 槽位未提供 hookContext 时的兜底：保持 hook 调用次数恒定。 */
+const NO_MENU_STATE = [false, () => {}];
+function useNoMenuOpenState() {
+  return NO_MENU_STATE;
+}
+
 /**
  * 会话「⋯」菜单里的一行：打开发送消息模态。
  * @param props - owner 给的 `sessionId`/`displayTitle`、渲染器给的 `t` 座位，
@@ -937,7 +782,7 @@ function SendMessageDialog(props) {
   const [query, setQuery] = React.useState('');
   const [targetId, setTargetId] = React.useState(typeof initialTargetId === 'string' && initialTargetId.length > 0 ? initialTargetId : null);
   const [text, setText] = React.useState('');
-  const [mode, setMode] = React.useState('queue');
+  const [mode, setMode] = React.useState('steer');
   const [sending, setSending] = React.useState(false);
   const [sendError, setSendError] = React.useState('');
   const [channel, setChannel] = React.useState(null);
@@ -1236,19 +1081,6 @@ function SendMessageDialog(props) {
             <span className="dstk-seg" role="group" aria-label={pickLabel(t, 'dialog.mode', '投递方式')}>
               <button
                 type="button"
-                aria-pressed={mode === 'queue'}
-                onClick={() => {
-                  try {
-                    setMode('queue');
-                  } catch (error) {
-                    console.warn('[dsh-session-telecom] 切换投递方式失败：', error);
-                  }
-                }}
-              >
-                {pickLabel(t, 'dialog.mode.queue', '排队投递')}
-              </button>
-              <button
-                type="button"
                 aria-pressed={mode === 'steer'}
                 onClick={() => {
                   try {
@@ -1258,7 +1090,20 @@ function SendMessageDialog(props) {
                   }
                 }}
               >
-                {pickLabel(t, 'dialog.mode.steer', '立即引导')}
+                {pickLabel(t, 'dialog.mode.steer', '直接投递（默认）')}
+              </button>
+              <button
+                type="button"
+                aria-pressed={mode === 'queue'}
+                onClick={() => {
+                  try {
+                    setMode('queue');
+                  } catch (error) {
+                    console.warn('[dsh-session-telecom] 切换投递方式失败：', error);
+                  }
+                }}
+              >
+                {pickLabel(t, 'dialog.mode.queue', '排队到下一轮')}
               </button>
             </span>
           </div>
@@ -1276,7 +1121,7 @@ function SendMessageDialog(props) {
           />
 
           <div className="dstk-muted">
-            {pickLabel(t, 'dialog.semantics', '这条消息会以「用户消息」的形式出现在目标会话的时间线上（对方看到的是有人发来消息，而不是它自己的输入），排队等它的下一回合处理；目标会话是冷会话时宿主会自动唤醒它。')}
+            {pickLabel(t, 'dialog.semantics', '默认「直接投递」：与内核 agent↔subagent 的 send_message 同一条规则——目标正在运行就在它的下一个 step 领取，空闲就直接为它开启新的一轮；只有选「排队到下一轮」才会等目标整轮结束。冷会话由宿主自动唤醒。')}
           </div>
           {sendError !== '' && (
             <div className="dstk-error" role="alert">
@@ -1355,15 +1200,8 @@ export function apply(ctx) {
     }
   };
 
-  // 菜单行 1：复制会话 ID。
-  registerEntry(
-    MENU_SLOT,
-    { id: COPY_ENTRY_ID, order: COPY_ENTRY_ORDER, locale: LOCALE_NS, registrant: REGISTRANT },
-    CopySessionIdMenuItem,
-    'copy session id',
-  );
-
-  // 菜单行 2：发送消息到会话…（打开模态）。
+  // 唯一的菜单行：发送消息到会话…（打开模态）。
+  // 「复制会话 ID」不再注册：宿主官方菜单已自带（见文件头注释）。
   registerEntry(
     MENU_SLOT,
     { id: SEND_ENTRY_ID, order: SEND_ENTRY_ORDER, locale: LOCALE_NS, registrant: REGISTRANT },

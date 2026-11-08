@@ -797,7 +797,7 @@ test('sessions/send：认得到落盘层时以落盘层为准（persistence → 
   assert.equal(result.value.persistence, 'session-persistence', '能读到盘就用盘上的证据');
 });
 
-test('sessions/send：mode=steer 走 agent.steer（进 next-step），默认 mode 是 queue', async () => {
+test('sessions/send：默认直接投递 = steer（与内核 send_message 同规则），queue 必须显式传', async () => {
   const target = makeFakeSession({ id: 's-busy', createdAt: 10 });
   const agent = makeFakeAgent(target, { status: 'running' });
   const ctx = makeCtx({ sessions: [target], agents: [agent] });
@@ -817,10 +817,146 @@ test('sessions/send：mode=steer 走 agent.steer（进 next-step），默认 mod
   assert.equal(target.flushCount, 1, '即使还没进日志也要过一遍 flush 屏障');
   assert.equal(agent.inbox.nextStep.length, 1);
 
+  // 默认 = 直接投递：目标正在运行时也进 next-step（下一个 step 就领取），绝不排到下一轮。
   const defaulted = await toolkit.dispatch(ENDPOINTS.send, { targetSessionId: 's-busy', text: '默认模式' });
-  assert.equal(defaulted.value.mode, 'queue');
+  assert.equal(defaulted.ok, true, JSON.stringify(defaulted));
+  assert.equal(defaulted.value.mode, 'steer', '默认必须是直接投递（steer），不是排到下一轮');
+  assert.equal(agent.calls.at(-1).target, 'next-step', '默认投递必须进 next-step，目标在下一个 step 就能领取');
+  assert.equal(agent.calls.at(-1).wakeup, true);
+
   const weird = await toolkit.dispatch(ENDPOINTS.send, { targetSessionId: 's-busy', text: '怪模式', mode: 'nonsense' });
-  assert.equal(weird.value.mode, 'queue', '未知 mode 回退 queue 而不是报错');
+  assert.equal(weird.value.mode, 'steer', '未知 mode 回退 steer 而不是报错');
+});
+
+test('sessions/send：空闲目标默认 steer 也会被唤醒（与 send_message 的"idle agent starts a new turn"一致）', async () => {
+  const target = makeFakeSession({ id: 's-idle', createdAt: 11 });
+  const agent = makeFakeAgent(target, { status: 'idle', driveOnEnqueue: true });
+  const ctx = makeCtx({ sessions: [target], agents: [agent] });
+  const result = await makeToolkit(ctx).dispatch(ENDPOINTS.send, { targetSessionId: 's-idle', text: '空闲目标' });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.value.mode, 'steer');
+  assert.equal(agent.calls[0].target, 'next-step');
+  assert.equal(agent.calls[0].wakeup, true, 'idle 目标必须被唤醒（内核 steer 带 wakeup=true，会开启新一轮）');
+  assert.equal(result.value.persisted, true, '被唤醒后消息立刻落进日志');
+});
+
+test('sessions/send：显式 mode=queue 才排到目标的下一轮（保留给"另起独立回合"）', async () => {
+  const target = makeFakeSession({ id: 's-queue', createdAt: 12 });
+  const agent = makeFakeAgent(target, { status: 'running' });
+  const ctx = makeCtx({ sessions: [target], agents: [agent] });
+  const result = await makeToolkit(ctx).dispatch(ENDPOINTS.send, { targetSessionId: 's-queue', text: '排队', mode: 'queue' });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.value.mode, 'queue');
+  assert.equal(agent.calls[0].target, 'next-turn');
+  assert.equal(agent.calls[0].wakeup, true);
+});
+
+// ---------------------------------------------------------------- wake（工具级唤醒）
+
+/** 假的唤醒登记表：只记录 deliver 传下来的身份，返回可控结果。 */
+function makeFakeWakeRegistry(outcome = { armed: true, fired: true }) {
+  const calls = [];
+  return {
+    calls,
+    request(input) {
+      calls.push(input);
+      return outcome;
+    },
+  };
+}
+
+test('sessions/send：默认 wake=none，不碰唤醒登记表（不打断目标的工具）', async () => {
+  const target = makeFakeSession({ id: 's-wake-none', createdAt: 13 });
+  const agent = makeFakeAgent(target, { status: 'running' });
+  const wakeRegistry = makeFakeWakeRegistry();
+  const ctx = makeCtx({ sessions: [target], agents: [agent] });
+  const result = await makeToolkit(ctx, { wakeRegistry }).dispatch(ENDPOINTS.send, { targetSessionId: 's-wake-none', text: 'hi' });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.value.wake, 'none');
+  assert.equal(result.value.wakeArmed, false);
+  assert.equal(result.value.wakeFired, false);
+  assert.deepEqual(wakeRegistry.calls, [], 'wake=none 时绝不许登记打断');
+});
+
+test('sessions/send：wake=tool 在 agents 路径按 messageId 登记，回执带 wake/wakeArmed/wakeFired', async () => {
+  const target = makeFakeSession({ id: 's-wake-agents', createdAt: 14 });
+  const agent = makeFakeAgent(target, { status: 'running' });
+  const wakeRegistry = makeFakeWakeRegistry({ armed: true, fired: true });
+  const ctx = makeCtx({ sessions: [target], agents: [agent], knownSenderIds: ['s-sender'] });
+  const result = await makeToolkit(ctx, { wakeRegistry }).dispatch(ENDPOINTS.send, {
+    targetSessionId: 's-wake-agents',
+    text: '急件',
+    senderSessionId: 's-sender',
+    wake: 'tool',
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.value.delivery, 'agents');
+  assert.equal(result.value.wake, 'tool');
+  assert.equal(result.value.wakeArmed, true);
+  assert.equal(result.value.wakeFired, true);
+  assert.equal(wakeRegistry.calls.length, 1);
+  assert.equal(wakeRegistry.calls[0].targetSessionId, 's-wake-agents');
+  assert.equal(wakeRegistry.calls[0].messageId, result.value.messageId, '自研路径按消息 id 认消息');
+  assert.equal(wakeRegistry.calls[0].senderSessionId, 's-sender');
+});
+
+test('sessions/send：wake=tool 在 prompt 路径按 requestId 登记（内核 source.rpcId 是同一把钥匙）', async () => {
+  const target = makeFakeSession({ id: 's-wake-prompt', createdAt: 15 });
+  const agent = makeFakeAgent(target, { status: 'running' });
+  const controller = makeFakeSessionController();
+  const wakeRegistry = makeFakeWakeRegistry({ armed: true, fired: false });
+  const ctx = makeCtx({ sessions: [target], agents: [agent], sessionController: controller });
+  const result = await makeToolkit(ctx, { wakeRegistry }).dispatch(ENDPOINTS.send, {
+    targetSessionId: 's-wake-prompt',
+    text: '急件',
+    senderSessionId: 's-sender',
+    wake: 'tool',
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.value.delivery, 'session-controller');
+  assert.equal(result.value.wake, 'tool');
+  assert.equal(result.value.wakeArmed, true);
+  assert.equal(result.value.wakeFired, false, '当前没有在跑的工具 → 只登记不打断');
+  assert.equal(wakeRegistry.calls.length, 1);
+  assert.equal(wakeRegistry.calls[0].requestId, result.value.requestId, 'prompt 路径按 requestId 认消息');
+  assert.equal(wakeRegistry.calls[0].messageId, undefined);
+});
+
+test('sessions/send：未知 wake 值回退 none（不打断），登记表不登记', async () => {
+  const target = makeFakeSession({ id: 's-wake-weird', createdAt: 16 });
+  const agent = makeFakeAgent(target, { status: 'running' });
+  const wakeRegistry = makeFakeWakeRegistry();
+  const ctx = makeCtx({ sessions: [target], agents: [agent] });
+  const result = await makeToolkit(ctx, { wakeRegistry }).dispatch(ENDPOINTS.send, {
+    targetSessionId: 's-wake-weird',
+    text: 'hi',
+    wake: 'interrupt-everything',
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.value.wake, 'none');
+  assert.deepEqual(wakeRegistry.calls, []);
+});
+
+test('sessions/send：登记表坏掉（request 抛错）不能推翻已接受的投递', async () => {
+  const target = makeFakeSession({ id: 's-wake-broken', createdAt: 17 });
+  const agent = makeFakeAgent(target, { status: 'running' });
+  const wakeRegistry = {
+    calls: 0,
+    request() {
+      wakeRegistry.calls += 1;
+      throw new Error('registry exploded');
+    },
+  };
+  const ctx = makeCtx({ sessions: [target], agents: [agent] });
+  const result = await makeToolkit(ctx, { wakeRegistry }).dispatch(ENDPOINTS.send, {
+    targetSessionId: 's-wake-broken',
+    text: 'hi',
+    wake: 'tool',
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.value.delivered, true);
+  assert.equal(result.value.wakeArmed, false);
+  assert.equal(wakeRegistry.calls, 1);
 });
 
 test('sessions/send：冷会话走 ctx.agents.resume 唤醒后投递（R3：带 agentOptions 与 setup）', async () => {
@@ -866,7 +1002,7 @@ test('sessions/send：冷会话走 ctx.agents.resume 唤醒后投递（R3：带 
   assert.deepEqual(presetRegistry.resolved, ['preset-cold']);
 
   assert.equal(revived.calls[0].method, 'send');
-  assert.equal(revived.calls[0].target, 'next-turn');
+  assert.equal(revived.calls[0].target, 'next-step', '冷会话恢复后同样走直接投递（默认 steer）');
   assert.equal(result.value.persisted, true);
   assert.equal(result.value.live, false, '投递前目标是冷的（客户端据此提示"已唤醒"，见 client/index.jsx:883）');
   assert.equal(result.value.resumed, true, 'resumed 才说明是本插件亲手唤醒的');
@@ -988,7 +1124,7 @@ test('deliverToSession 的薄 API 直接可用（Lead e2e 走这条路）', asyn
   assert.equal(value.delivered, true);
   assert.equal(value.persisted, true);
   assert.equal(agent.calls[0].method, 'send');
-  assert.equal(agent.calls[0].target, 'next-turn');
+  assert.equal(agent.calls[0].target, 'next-step', '薄 API 的默认投递同样是直接投递（steer）');
 });
 
 // ---------------------------------------------------------------- R2：所有权策略 + 内核 RPC 路径
@@ -1008,7 +1144,7 @@ test('R2：有 sessionController 时首选 sessionController.prompt（不碰 age
     targetSessionId: 's-live',
     text: '  走内核  ',
     senderSessionId: 's-sender',
-    mode: 'steer',
+    // 不传 mode：默认就是直接投递（steer），与 send_message 同规则
   });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.value.delivered, true);
@@ -1138,7 +1274,7 @@ test('投递策略：delivery:"agents" 强制自研路径；"prompt" 缺少 sess
   assert.equal(forced.value.delivery, 'agents');
   assert.equal(forced.value.sourceKind, 'agent-message');
   assert.deepEqual(controller.calls, [], 'agents 策略下不该碰 sessionController');
-  assert.equal(agent.calls[0].target, 'next-turn');
+  assert.equal(agent.calls[0].target, 'next-step', 'agents 路径的默认投递也是 steer');
 
   const noController = await makeToolkit(makeCtx({ sessions: [target], agents: [agent] }), { delivery: 'prompt' })
     .dispatch(ENDPOINTS.send, { targetSessionId: 's-strategy', text: 'hi' });
@@ -1589,7 +1725,7 @@ test('apply：把通道挂到 webServer（prefix 路由）并在 ctx.effect 里�
   assert.equal(body.result.ok, true);
   assert.equal(body.result.value.delivered, true);
   assert.equal(agent.calls[0].method, 'send');
-  assert.equal(agent.calls[0].target, 'next-turn');
+  assert.equal(agent.calls[0].target, 'next-step', 'RPC 路由默认投递同样是直接投递（steer）');
 
   // 清理（cordis 语义：effect 注册的 setup 返回 disposer，由 fiber 调用）
   assert.equal(disposed, 0);

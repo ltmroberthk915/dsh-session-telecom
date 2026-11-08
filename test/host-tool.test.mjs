@@ -262,6 +262,14 @@ test('send：发信方取自 exec.agent，投递参数逐字透传（含 mode �
   assert.equal(seen[0].mode, 'steer');
   assert.equal(seen[0].senderPrefix, undefined, '默认不覆写开关（投递层默认开）');
   assert.match(renderText(tool, { action: 'send' }, value), /已投递给/, '回执要短：一行、不重复目标 id');
+
+  // 不传 mode：默认就是直接投递（steer），对齐内核 send_message 的交互规则。
+  await tool.execute({ action: 'send', targetSessionId: 's-target', text: '默认' }, execFor('s-caller'));
+  assert.equal(seen[1].mode, 'steer', '不传 mode 时默认 steer（不是 queue）');
+
+  // wake 透传：工具层负责把决定交给投递层，默认不传 = 不打断。
+  await tool.execute({ action: 'send', targetSessionId: 's-target', text: '急件', wake: 'tool' }, execFor('s-caller'));
+  assert.equal(seen[2].wake, 'tool', 'wake 必须透传到投递层');
 });
 
 test('send：署名开关在工具层透传给投递层（senderPrefix:false）', async () => {

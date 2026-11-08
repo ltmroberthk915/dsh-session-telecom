@@ -1,7 +1,7 @@
 {
   "name": "dsh-session-telecom",
-  "version": "1.1.0",
-  "description": "DSH session communication: read existing transcripts, copy session IDs, message live or saved sessions, and inspect token usage. Uses host runtime services without installing a second DSH core.",
+  "version": "1.3.1",
+  "description": "让任意两条 DeepSeek Harness 会话直接对话：跨会话发消息、工具级唤醒、只读查看与用量统计 · Cross-session messaging for DSH.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {

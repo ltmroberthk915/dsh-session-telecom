@@ -1,5 +1,5 @@
 // Lead 侧冒烟：把构建产物 client/client.js 放进一个最小化的"假浏览器"里执行，
-// 断言它确实注册进了模块系统，并驱动菜单行组件验证"复制 sessionId → 关闭菜单"。
+// 断言它确实注册进了模块系统，并驱动「发送消息到会话」菜单行验证"点击 → 关菜单 → 开模态"。
 //
 // 为什么值得单独做：产物是"经典脚本 + __ModuleLoader__.load"格式，语法错误、
 // 误用 ESM、误内联 react 这三类问题在静态 grep 里看不出来，而真机验证成本高。
@@ -205,24 +205,30 @@ test('factory 产出的模块面满足客户端插件契约，apply 只注册不
   const registered = [];
   assert.doesNotThrow(() => moduleExports.apply(makeCtx(registered, injected)));
   assert.ok(injected.includes('sidebar.workspaces.session.menu.item'), '必须注入会话菜单槽位');
-  assert.ok(registered.length >= 1, '至少注册一行菜单项');
-  const copyEntry = registered.find((row) => row.entry.id === 'session-toolkit-copy-id');
-  assert.ok(copyEntry !== undefined, '必须注册「复制会话 ID」行');
-  assert.equal(copyEntry.entry.order, 250, 'order 250 = 落在重命名 200 与分叉 300 之间');
-  assert.equal(typeof copyEntry.component, 'function');
+  const sendEntry = registered.find((row) => row.entry.id === 'session-toolkit-send-message');
+  assert.ok(sendEntry !== undefined, '必须注册「发送消息到会话」菜单行');
+  assert.equal(sendEntry.entry.order, 260);
+  assert.equal(typeof sendEntry.component, 'function');
+  // 2026-11-08：宿主官方菜单已自带「复制 Session ID」（dsh-client-ui-workspace 的
+  // SessionIdMenuItem → menu.sessionId → actions.copySessionId），插件不再重复注册，
+  // 免得右键菜单变长。这里锁住"不许回来"。
+  assert.equal(
+    registered.find((row) => row.entry.id === 'session-toolkit-copy-id'),
+    undefined,
+    '不许再注册「复制会话 ID」行（官方宿主已提供）',
+  );
 });
 
-test('菜单行：带 sessionId 时点一下就把 id 复制进剪贴板并关闭菜单', async () => {
-  const { registrations, navigator: sandboxNavigator } = await loadBundle();
+test('菜单行：发送消息到会话…点击后关闭菜单并打开模态', async () => {
+  const { registrations } = await loadBundle();
   const moduleExports = registrations[0].factory(factoryRequire);
-  const injected = [];
   const registered = [];
-  moduleExports.apply(makeCtx(registered, injected));
-  const copyRow = registered.find((row) => row.entry.id === 'session-toolkit-copy-id');
-  assert.ok(copyRow !== undefined);
+  moduleExports.apply(makeCtx(registered, []));
+  const sendRow = registered.find((row) => row.entry.id === 'session-toolkit-send-message');
+  assert.ok(sendRow !== undefined);
 
   const closed = [];
-  const tree = renderComponent(copyRow.component, {
+  const tree = renderComponent(sendRow.component, {
     sessionId: 'session-abc-123',
     displayTitle: '示例会话',
     t: undefined,
@@ -237,43 +243,22 @@ test('菜单行：带 sessionId 时点一下就把 id 复制进剪贴板并关�
   assert.equal(children.length, 2, '一行 = 图标 + 文案');
   const labelSpan = children.find((child) => child?.type === 'span' && typeof child.props.children === 'string');
   assert.ok(labelSpan !== undefined, '文案要用 span 渲染');
-  assert.match(labelSpan.props.children, /复制会话 ID/);
+  assert.match(labelSpan.props.children, /发送消息到会话/);
 
-  let clipboardText = null;
-  // 剪贴板必须装在 vm 沙箱自己的 navigator 上：组件闭包读的是沙箱里的 navigator。
-  sandboxNavigator.clipboard.writeText = async (value) => {
-    clipboardText = value;
-  };
-  try {
-    button.props.onClick({ preventDefault() {}, stopPropagation() {} });
-    await new Promise((resolve) => setTimeout(resolve, 30));
-  } finally {
-    sandboxNavigator.clipboard.writeText = async () => {};
-  }
-  assert.equal(clipboardText, 'session-abc-123', '应当把 sessionId 写进剪贴板');
-  assert.deepEqual(closed, [false], '应当先关闭菜单，再执行复制');
+  assert.doesNotThrow(() => button.props.onClick({ preventDefault() {}, stopPropagation() {} }));
+  assert.deepEqual(closed, [false], '应当先关闭菜单，再打开模态');
 });
 
-test('菜单行：sessionId 缺失时置灰且点击不发剪贴板调用', async () => {
-  const { registrations, navigator: sandboxNavigator } = await loadBundle();
+test('菜单行：sessionId 缺失时置灰', async () => {
+  const { registrations } = await loadBundle();
   const moduleExports = registrations[0].factory(factoryRequire);
   const registered = [];
   moduleExports.apply(makeCtx(registered, []));
-  const copyRow = registered.find((row) => row.entry.id === 'session-toolkit-copy-id');
+  const sendRow = registered.find((row) => row.entry.id === 'session-toolkit-send-message');
+  assert.ok(sendRow !== undefined);
 
-  const tree = renderComponent(copyRow.component, { sessionId: undefined, t: undefined });
+  const tree = renderComponent(sendRow.component, { sessionId: undefined, t: undefined });
   const button = tree.props.children;
   assert.equal(button.props.disabled, true, '拿不到 sessionId 必须置灰');
-
-  let called = false;
-  sandboxNavigator.clipboard.writeText = async () => {
-    called = true;
-  };
-  try {
-    assert.doesNotThrow(() => button.props.onClick({ preventDefault() {}, stopPropagation() {} }));
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  } finally {
-    sandboxNavigator.clipboard.writeText = async () => {};
-  }
-  assert.equal(called, false, '置灰时不应触碰剪贴板');
+  assert.doesNotThrow(() => button.props.onClick({ preventDefault() {}, stopPropagation() {} }));
 });
